@@ -92,3 +92,4 @@ button:disabled{opacity:.5}
 .chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 .scorebig{font-size:56px;font-weight:800;line-height:1}
 .center{text-align:center}
+.lecture{font-size:15px;line-height:1.9;white-space:normal;word-break:break-word}

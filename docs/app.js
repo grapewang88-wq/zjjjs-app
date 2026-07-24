@@ -32,11 +32,21 @@ const DAY = 86400000;
 // ---------- 数据 ----------
 let BANK = [];
 let BYID = {};
+let CHAPTERS = { '基础': [], '人力': [] };
+let CHBYID = {};
+let LECTURE = {};
 async function loadBank() {
-  const r = await fetch('bank.json');
-  BANK = await r.json();
-  BANK.forEach(q => BYID[q.id] = q);
+  const [b, c, l] = await Promise.all([
+    fetch('bank.json').then(r => r.json()),
+    fetch('chapters.json').then(r => r.json()).catch(() => ({ '基础': [], '人力': [] })),
+    fetch('lecture.json').then(r => r.json()).catch(() => ({})),
+  ]);
+  BANK = b; BANK.forEach(q => BYID[q.id] = q);
+  CHAPTERS = c; Object.values(c).flat().forEach(ch => CHBYID[ch.id] = ch);
+  LECTURE = l;
 }
+function chName(cid) { return CHBYID[cid] ? CHBYID[cid].name : '未分类'; }
+function chPart(cid) { return CHBYID[cid] ? CHBYID[cid].part : ''; }
 
 // ---------- 工具 ----------
 const $ = sel => document.querySelector(sel);
@@ -86,6 +96,8 @@ routes.home = () => {
       <span class="ico">📕</span><div><div>错题本 · 间隔重复</div><div class="d">${dueCount ? `有 ${dueCount} 道待复习` : '按遗忘曲线自动安排复习'}</div></div><span class="arrow">›</span></button>
     <button class="menu-btn" onclick="nav('exam')">
       <span class="ico">📝</span><div><div>模拟考试</div><div class="d">仿真题量·限时·自动评分</div></div><span class="arrow">›</span></button>
+    <button class="menu-btn" onclick="nav('chapters')">
+      <span class="ico">📖</span><div><div>章节讲解 · 按章练习</div><div class="d">三色笔记 · 重点高亮</div></div><span class="arrow">›</span></button>
     <div class="card sub" style="font-size:13px">
       题库共 <b>${BANK.length}</b> 道（基础 ${BANK.filter(q => q.subject === '基础').length} · 人力 ${BANK.filter(q => q.subject === '人力').length}），
       来源含历年真题、模拟卷与习题。
@@ -101,33 +113,55 @@ routes.practice = (params) => {
   const subj = params.subject || store._lastSubject || '基础';
   store._lastSubject = subj; saveStore();
   const src = params.src || '全部';
-  const pool = filterPool(subj, src);
+  const chap = params.chap || '';   // 章节 id，空=全部章节
+  const pool = filterPool(subj, src, chap);
   app().innerHTML = `
     ${topbar('刷题练习', "nav('home')")}
     <div class="card">
       <h3>选择科目</h3>
       <div class="seg">${SUBJECTS.map(s => `<button class="${s === subj ? 'active' : ''}" onclick="nav('practice',{subject:'${s}',src:'${src}'})">${SUBJECT_FULL[s]}</button>`).join('')}</div>
       <h3>题目来源</h3>
-      <div>${['全部', '真题', '模拟题', '习题'].map(t => `<span class="chip ${t === src ? 'active' : ''}" onclick="nav('practice',{subject:'${subj}',src:'${t}'})">${t}${t !== '全部' ? ` (${filterPool(subj, t).length})` : ` (${pool.length})`}</span>`).join('')}</div>
+      <div>${['全部', '真题', '模拟题', '习题'].map(t => `<span class="chip ${t === src ? 'active' : ''}" onclick="nav('practice',{subject:'${subj}',src:'${t}',chap:'${chap}'})">${t}${t !== '全部' ? ` (${filterPool(subj, t, '').length})` : ` (${filterPool(subj, '全部', '').length})`}</span>`).join('')}</div>
+      <h3 style="margin-top:14px">章节 ${chap ? `· <span style="color:var(--brand)">${esc(chName(chap))}</span>` : '· 全部'}</h3>
+      <div class="row">
+        <button class="sec sm" onclick="nav('practice',{subject:'${subj}',src:'${src}',chap:''})">全部章节</button>
+        <button class="sec sm" onclick="pickChapter('${subj}','${src}')">按章节选择 ›</button>
+      </div>
     </div>
     <div class="card center">
       <div class="sub">可练习 <b style="color:var(--brand);font-size:20px">${pool.length}</b> 道题</div>
       <div class="row" style="margin-top:14px">
-        <button onclick="startPractice('${subj}','${src}',false)">顺序练习</button>
-        <button class="ghost" onclick="startPractice('${subj}','${src}',true)">乱序练习</button>
+        <button onclick="startPractice('${subj}','${src}',false,false,'${chap}')" ${pool.length ? '' : 'disabled'}>顺序练习</button>
+        <button class="ghost" onclick="startPractice('${subj}','${src}',true,false,'${chap}')" ${pool.length ? '' : 'disabled'}>乱序练习</button>
       </div>
-      <button class="sec sm" style="margin-top:10px;flex:none" onclick="startPractice('${subj}','${src}',true,true)">只练未做过的题</button>
+      <button class="sec sm" style="margin-top:10px;flex:none" onclick="startPractice('${subj}','${src}',true,true,'${chap}')">只练未做过的题</button>
     </div>`;
 };
-function filterPool(subj, src) {
-  return BANK.filter(q => q.subject === subj && (src === '全部' || q.source_type === src));
+function filterPool(subj, src, chap) {
+  return BANK.filter(q => q.subject === subj
+    && (src === '全部' || !src || q.source_type === src)
+    && (!chap || q.chapter === chap));
 }
-window.startPractice = (subj, src, shuf, onlyNew) => {
-  let pool = filterPool(subj, src);
+window.pickChapter = (subj, src) => {
+  const chs = CHAPTERS[subj] || [];
+  // 按部分分组
+  const groups = {};
+  chs.forEach(c => { (groups[c.part] = groups[c.part] || []).push(c); });
+  const cnt = cid => BANK.filter(q => q.subject === subj && q.chapter === cid).length;
+  app().innerHTML = `${topbar('选择章节', `nav('practice',{subject:'${subj}',src:'${src}'})`)}
+    ${Object.entries(groups).map(([part, list]) => `
+      <div class="card">
+        <h3>${esc(part || '其他')}</h3>
+        ${list.map(c => `<div class="opt" style="cursor:pointer" onclick="nav('practice',{subject:'${subj}',src:'${src}',chap:'${c.id}'})">
+          <div style="flex:1">${esc(c.name)}</div><div class="pill">${cnt(c.id)}</div></div>`).join('')}
+      </div>`).join('')}`;
+};
+window.startPractice = (subj, src, shuf, onlyNew, chap) => {
+  let pool = filterPool(subj, src, chap);
   if (onlyNew) pool = pool.filter(q => !store.answered[q.id]);
   if (!pool.length) { alert('没有符合条件的题目'); return; }
   if (shuf) pool = shuffle(pool);
-  practiceState = { ids: pool.map(q => q.id), i: 0, subj, src };
+  practiceState = { ids: pool.map(q => q.id), i: 0, subj, src, chap: chap || '' };
   renderPractice();
 };
 function renderPractice() {
@@ -149,7 +183,7 @@ function finishPractice() {
       <div class="scorebig" style="color:var(--brand)">${Math.round(correct / ids.length * 100)}%</div>
       <div class="sub">共 ${ids.length} 题 · 答对 ${correct} · 答错 ${ids.length - correct}</div>
       <div class="row" style="margin-top:18px">
-        <button onclick="startPractice('${st.subj}','${st.src}',true)">再来一组</button>
+        <button onclick="startPractice('${st.subj}','${st.src}',true,false,'${st.chap || ''}')">再来一组</button>
         <button class="ghost" onclick="nav('wrong')">看错题本</button>
       </div>
     </div>`;
@@ -165,6 +199,7 @@ function questionCard(q, opt = {}) {
       <div class="qmeta">
         ${srcPill(q.source_type)}${q.year ? `<span class="pill">${q.year}</span>` : ''}
         <span class="pill ${isMulti ? 'multi' : ''}">${isMulti ? '多选题' : '单选题'}</span>
+        ${q.chapter ? `<span class="pill brand" style="cursor:pointer" onclick="openLecture('${q.chapter}')">${esc(chName(q.chapter))} ›</span>` : ''}
         ${store.wrong[q.id] ? '<span class="pill" style="color:var(--bad)">错题</span>' : ''}
       </div>
       <div class="qstem">${esc(q.stem)}</div>
@@ -279,7 +314,74 @@ routes.wrong = (params) => {
       <div class="row" style="margin-top:10px">
         ${SUBJECTS.map(s => `<button class="ghost" onclick="startReview('${s}')" ${(bySubj[s] || 0) ? '' : 'disabled'}>复习${s}全部(${bySubj[s] || 0})</button>`).join('')}
       </div>
-    </div>`}`;
+    </div>
+    ${wrongChapterBreakdown(all)}`}`;
+};
+function wrongChapterBreakdown(ids) {
+  // 按章节统计错题，倒序，帮助定位薄弱章节
+  const byCh = {};
+  ids.forEach(id => { const c = BYID[id].chapter || '未分类'; byCh[c] = (byCh[c] || 0) + 1; });
+  const rows = Object.entries(byCh).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  if (!rows.length) return '';
+  const max = rows[0][1];
+  return `<div class="card"><h3>薄弱章节（错题分布）</h3>
+    <div class="sub" style="margin-bottom:10px">点击章节可直接练该章错题以外的题，或查看讲解。</div>
+    ${rows.map(([cid, n]) => `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:3px">
+          <span style="cursor:pointer" onclick="${cid !== '未分类' ? `openLecture('${cid}')` : ''}">${esc(cid === '未分类' ? '未分类' : chName(cid))}${cid !== '未分类' && LECTURE[cid] ? ' 📖' : ''}</span>
+          <span style="color:var(--bad);font-weight:700">${n}</span>
+        </div>
+        <div class="progress"><i style="width:${n / max * 100}%;background:var(--bad)"></i></div>
+      </div>`).join('')}
+  </div>`;
+}
+// 章节讲解
+window.openLecture = (cid) => { location.hash = '#lecture?cid=' + cid; };
+routes.lecture = (params) => {
+  const cid = params.cid;
+  const ch = CHBYID[cid];
+  const content = LECTURE[cid];
+  const qn = BANK.filter(q => q.chapter === cid).length;
+  const back = "history.length>1?history.back():nav('home')";
+  app().innerHTML = `${topbar(ch ? ch.name : '章节讲解', back)}
+    <div class="card">
+      <div class="qmeta">${ch ? `<span class="pill">${esc(ch.part)}</span>` : ''}<span class="pill brand">${qn} 道题</span></div>
+      <h2>${ch ? esc(ch.name) : '未分类'}</h2>
+      <div class="row" style="margin-top:10px">
+        <button class="sm" onclick="startPractice('${cid.split('-')[0]}','全部',false,false,'${cid}')">练本章题目</button>
+      </div>
+    </div>
+    ${content ? `<div class="card"><h3>三色笔记讲解</h3><div class="lecture">${renderLecture(content)}</div>
+      <div class="sub" style="margin-top:10px">红色为重点、蓝色为次重点，源自三色笔记标注。</div></div>`
+      : `<div class="empty"><div class="big">📖</div>本章暂无三色笔记讲解<br><span class="sub">可先通过“练本章题目”结合解析复习</span></div>`}`;
+};
+function renderLecture(runs) {
+  const color = { '重点': 'var(--bad)', '次重点': 'var(--brand2)', '补充': 'var(--ok)' };
+  return runs.map(r => {
+    const t = esc(r.t).replace(/\n/g, '<br>');
+    if (r.tier && r.tier !== '常规' && color[r.tier]) return `<span style="color:${color[r.tier]};font-weight:600">${t}</span>`;
+    return t;
+  }).join('');
+}
+// 章节浏览
+routes.chapters = (params) => {
+  const subj = params.subject || store._lastSubject || '基础';
+  const chs = CHAPTERS[subj] || [];
+  const groups = {};
+  chs.forEach(c => { (groups[c.part] = groups[c.part] || []).push(c); });
+  const cnt = cid => BANK.filter(q => q.subject === subj && q.chapter === cid).length;
+  app().innerHTML = `${topbar('章节讲解', "nav('home')")}
+    <div class="card">
+      <div class="seg">${SUBJECTS.map(s => `<button class="${s === subj ? 'active' : ''}" onclick="nav('chapters',{subject:'${s}'})">${SUBJECT_FULL[s]}</button>`).join('')}</div>
+    </div>
+    ${Object.entries(groups).map(([part, list]) => `
+      <div class="card">
+        <h3>${esc(part || '其他')}</h3>
+        ${list.map(c => `<div class="opt" style="cursor:pointer" onclick="openLecture('${c.id}')">
+          <div style="flex:1">${esc(c.name)} ${LECTURE[c.id] ? '📖' : ''}</div>
+          <div class="pill">${cnt(c.id)} 题</div></div>`).join('')}
+      </div>`).join('')}`;
 };
 window.startReview = (which) => {
   S();
