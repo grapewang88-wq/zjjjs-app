@@ -36,14 +36,27 @@ let CHAPTERS = { '基础': [], '人力': [] };
 let CHBYID = {};
 let LECTURE = {};
 async function loadBank() {
-  const [b, c, l] = await Promise.all([
+  const [b, c, l, ch2] = await Promise.all([
     fetch('bank.json').then(r => r.json()),
     fetch('chapters.json').then(r => r.json()).catch(() => ({ '基础': [], '人力': [] })),
     fetch('lecture.json').then(r => r.json()).catch(() => ({})),
+    fetch('changes.json').then(r => r.json()).catch(() => ({})),
   ]);
   BANK = b; BANK.forEach(q => BYID[q.id] = q);
   CHAPTERS = c; Object.values(c).flat().forEach(ch => CHBYID[ch.id] = ch);
-  LECTURE = l;
+  LECTURE = l; CHANGES = ch2;
+}
+let CHANGES = {};
+function changeAlert(cid) {
+  const cg = CHANGES[cid];
+  if (!cg) return '';
+  const adds = (cg.adds && cg.adds.length) ? `<div style="margin-top:8px"><b>2025 新增/变动考点：</b><ul style="margin:6px 0 0;padding-left:20px">${cg.adds.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : '';
+  return `<div class="card" style="border-left:4px solid var(--warn)">
+    <div style="color:var(--warn);font-weight:700">⚠️ 2025 考纲变动章节${cg.big ? '（较大变动）' : ''}</div>
+    ${cg.note ? `<div class="sub" style="margin-top:6px">${esc(cg.note)}</div>` : ''}
+    ${adds}
+    <div class="sub" style="margin-top:8px;font-size:12px">提示：历年真题可能未覆盖这些新增点，2026 年需重点关注。</div>
+  </div>`;
 }
 function chName(cid) { return CHBYID[cid] ? CHBYID[cid].name : '未分类'; }
 function chPart(cid) { return CHBYID[cid] ? CHBYID[cid].part : ''; }
@@ -352,6 +365,7 @@ routes.lecture = (params) => {
         <button class="sm" onclick="startPractice('${cid.split('-')[0]}','全部',false,false,'${cid}')">练本章题目</button>
       </div>
     </div>
+    ${changeAlert(cid)}
     ${content ? `<div class="card"><h3>三色笔记讲解</h3><div class="lecture">${renderLecture(content)}</div>
       <div class="sub" style="margin-top:10px">红色为重点、蓝色为次重点，源自三色笔记标注。</div></div>`
       : `<div class="empty"><div class="big">📖</div>本章暂无三色笔记讲解<br><span class="sub">可先通过“练本章题目”结合解析复习</span></div>`}`;
@@ -379,7 +393,7 @@ routes.chapters = (params) => {
       <div class="card">
         <h3>${esc(part || '其他')}</h3>
         ${list.map(c => `<div class="opt" style="cursor:pointer" onclick="openLecture('${c.id}')">
-          <div style="flex:1">${esc(c.name)} ${LECTURE[c.id] ? '📖' : ''}</div>
+          <div style="flex:1">${esc(c.name)} ${LECTURE[c.id] ? '📖' : ''} ${CHANGES[c.id] ? '<span style="color:var(--warn)">⚠️2025变动</span>' : ''}</div>
           <div class="pill">${cnt(c.id)} 题</div></div>`).join('')}
       </div>`).join('')}`;
 };
