@@ -1,0 +1,13 @@
+{
+  "name": "中级经济师备考",
+  "short_name": "经济师备考",
+  "description": "中级经济师真题刷题 · 错题本(间隔重复) · 模拟考试",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#182d6e",
+  "theme_color": "#182d6e",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

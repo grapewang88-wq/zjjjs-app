@@ -1,0 +1,505 @@
+/* 中级经济师备考 App —— 纯前端，数据存 localStorage */
+'use strict';
+
+// ---------- 常量 ----------
+const SUBJECTS = ['基础', '人力'];
+const SUBJECT_FULL = { '基础': '经济基础知识', '人力': '人力资源管理' };
+// 模拟考规格（题量/分值/时长/合格线）
+const EXAM_SPEC = {
+  '基础': { single: 70, multi: 35, singlePt: 1, multiPt: 2, minutes: 90, total: 140, pass: 84 },
+  '人力': { single: 60, multi: 40, singlePt: 1, multiPt: 2, minutes: 90, total: 140, pass: 84 },
+};
+// 间隔重复（天）：错题进盒子0，做对升盒，做错回0；升到最高盒即“毕业”
+const SR_INTERVALS = [0, 1, 3, 7]; // 盒子0~3；答对4次毕业
+
+// ---------- 存储 ----------
+const LS_KEY = 'zjjjs_v1';
+let store = loadStore();
+function loadStore() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveStore() { localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+function S() {
+  store.answered = store.answered || {};   // id -> {correct:bool, ts}
+  store.wrong = store.wrong || {};          // id -> {box, due, addTs, lastTs, wrongCount}
+  store.stats = store.stats || {};          // subject -> {done, correct}
+  store.exams = store.exams || [];          // 模拟考历史
+  return store;
+}
+const now = () => Date.now();
+const DAY = 86400000;
+
+// ---------- 数据 ----------
+let BANK = [];
+let BYID = {};
+async function loadBank() {
+  const r = await fetch('bank.json');
+  BANK = await r.json();
+  BANK.forEach(q => BYID[q.id] = q);
+}
+
+// ---------- 工具 ----------
+const $ = sel => document.querySelector(sel);
+const app = () => $('#app');
+function esc(s) { return (s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+function sample(arr, n) { return shuffle(arr).slice(0, n); }
+function srcPill(t) { const m = { '真题': 'real', '模拟题': 'mock', '习题': 'ex' }; return `<span class="pill ${m[t] || ''}">${t}</span>`; }
+
+// ---------- 路由 ----------
+const routes = {};
+function nav(name, params) { location.hash = '#' + name + (params ? '?' + new URLSearchParams(params) : ''); }
+function router() {
+  const raw = location.hash.slice(1) || 'home';
+  const [name, qs] = raw.split('?');
+  const params = Object.fromEntries(new URLSearchParams(qs || ''));
+  (routes[name] || routes.home)(params);
+  document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', router);
+
+// ==================================================================
+// 首页
+// ==================================================================
+routes.home = () => {
+  S();
+  const totalDone = Object.keys(store.answered).length;
+  const totalCorrect = Object.values(store.answered).filter(a => a.correct).length;
+  const dueCount = dueWrongIds().length;
+  const wrongTotal = Object.keys(store.wrong).length;
+  const rate = totalDone ? Math.round(totalCorrect / totalDone * 100) : 0;
+  app().innerHTML = `
+    <div class="hero">
+      <h1>中级经济师备考</h1>
+      <div class="sub">距 2026 年 11 月 7 日考试 · 以通过为目标</div>
+    </div>
+    <div class="card"><div class="grid2">
+      <div class="stat"><div class="n">${totalDone}</div><div class="l">累计做题</div></div>
+      <div class="stat"><div class="n">${rate}%</div><div class="l">正确率</div></div>
+      <div class="stat"><div class="n" style="color:var(--bad)">${wrongTotal}</div><div class="l">错题总数</div></div>
+      <div class="stat"><div class="n" style="color:var(--warn)">${dueCount}</div><div class="l">今日待复习</div></div>
+    </div></div>
+    <button class="menu-btn" onclick="nav('practice')">
+      <span class="ico">✏️</span><div><div>刷题练习</div><div class="d">真题优先 · 即时解析</div></div><span class="arrow">›</span></button>
+    <button class="menu-btn" onclick="nav('wrong')">
+      <span class="ico">📕</span><div><div>错题本 · 间隔重复</div><div class="d">${dueCount ? `有 ${dueCount} 道待复习` : '按遗忘曲线自动安排复习'}</div></div><span class="arrow">›</span></button>
+    <button class="menu-btn" onclick="nav('exam')">
+      <span class="ico">📝</span><div><div>模拟考试</div><div class="d">仿真题量·限时·自动评分</div></div><span class="arrow">›</span></button>
+    <div class="card sub" style="font-size:13px">
+      题库共 <b>${BANK.length}</b> 道（基础 ${BANK.filter(q => q.subject === '基础').length} · 人力 ${BANK.filter(q => q.subject === '人力').length}），
+      来源含历年真题、模拟卷与习题。
+    </div>`;
+};
+
+// ==================================================================
+// 刷题练习
+// ==================================================================
+let practiceState = null;
+routes.practice = (params) => {
+  if (params.start) return renderPractice();
+  const subj = params.subject || store._lastSubject || '基础';
+  store._lastSubject = subj; saveStore();
+  const src = params.src || '全部';
+  const pool = filterPool(subj, src);
+  app().innerHTML = `
+    ${topbar('刷题练习', "nav('home')")}
+    <div class="card">
+      <h3>选择科目</h3>
+      <div class="seg">${SUBJECTS.map(s => `<button class="${s === subj ? 'active' : ''}" onclick="nav('practice',{subject:'${s}',src:'${src}'})">${SUBJECT_FULL[s]}</button>`).join('')}</div>
+      <h3>题目来源</h3>
+      <div>${['全部', '真题', '模拟题', '习题'].map(t => `<span class="chip ${t === src ? 'active' : ''}" onclick="nav('practice',{subject:'${subj}',src:'${t}'})">${t}${t !== '全部' ? ` (${filterPool(subj, t).length})` : ` (${pool.length})`}</span>`).join('')}</div>
+    </div>
+    <div class="card center">
+      <div class="sub">可练习 <b style="color:var(--brand);font-size:20px">${pool.length}</b> 道题</div>
+      <div class="row" style="margin-top:14px">
+        <button onclick="startPractice('${subj}','${src}',false)">顺序练习</button>
+        <button class="ghost" onclick="startPractice('${subj}','${src}',true)">乱序练习</button>
+      </div>
+      <button class="sec sm" style="margin-top:10px;flex:none" onclick="startPractice('${subj}','${src}',true,true)">只练未做过的题</button>
+    </div>`;
+};
+function filterPool(subj, src) {
+  return BANK.filter(q => q.subject === subj && (src === '全部' || q.source_type === src));
+}
+window.startPractice = (subj, src, shuf, onlyNew) => {
+  let pool = filterPool(subj, src);
+  if (onlyNew) pool = pool.filter(q => !store.answered[q.id]);
+  if (!pool.length) { alert('没有符合条件的题目'); return; }
+  if (shuf) pool = shuffle(pool);
+  practiceState = { ids: pool.map(q => q.id), i: 0, subj, src };
+  renderPractice();
+};
+function renderPractice() {
+  const st = practiceState;
+  if (!st) return nav('practice');
+  const q = BYID[st.ids[st.i]];
+  app().innerHTML = `
+    ${topbar(`${st.subj} · ${st.i + 1}/${st.ids.length}`, "if(confirm('退出本次练习？'))nav('practice')")}
+    <div class="progress"><i style="width:${(st.i + 1) / st.ids.length * 100}%"></i></div>
+    ${questionCard(q, { mode: 'practice' })}`;
+  wireQuestion(q, { mode: 'practice', onNext: () => { if (st.i < st.ids.length - 1) { st.i++; renderPractice(); } else finishPractice(); } });
+}
+function finishPractice() {
+  const st = practiceState;
+  const ids = st.ids;
+  const correct = ids.filter(id => store.answered[id] && store.answered[id].correct).length;
+  app().innerHTML = `${topbar('练习完成', "nav('home')")}
+    <div class="card center">
+      <div class="scorebig" style="color:var(--brand)">${Math.round(correct / ids.length * 100)}%</div>
+      <div class="sub">共 ${ids.length} 题 · 答对 ${correct} · 答错 ${ids.length - correct}</div>
+      <div class="row" style="margin-top:18px">
+        <button onclick="startPractice('${st.subj}','${st.src}',true)">再来一组</button>
+        <button class="ghost" onclick="nav('wrong')">看错题本</button>
+      </div>
+    </div>`;
+}
+
+// ==================================================================
+// 通用题目卡片 + 作答逻辑
+// ==================================================================
+function questionCard(q, opt = {}) {
+  const isMulti = q.type === 'multi';
+  return `
+    <div class="card" id="qcard">
+      <div class="qmeta">
+        ${srcPill(q.source_type)}${q.year ? `<span class="pill">${q.year}</span>` : ''}
+        <span class="pill ${isMulti ? 'multi' : ''}">${isMulti ? '多选题' : '单选题'}</span>
+        ${store.wrong[q.id] ? '<span class="pill" style="color:var(--bad)">错题</span>' : ''}
+      </div>
+      <div class="qstem">${esc(q.stem)}</div>
+      <div id="opts">${Object.entries(q.options).map(([k, v]) =>
+        `<div class="opt" data-k="${k}"><div class="k">${k}</div><div>${esc(v)}</div></div>`).join('')}</div>
+      <div id="feedback"></div>
+      <div class="sticky-actions"><button id="submitBtn" ${''}>${isMulti ? '确认（多选）' : '提交'}</button></div>
+    </div>`;
+}
+function wireQuestion(q, { mode, onNext }) {
+  const isMulti = q.type === 'multi';
+  let sel = new Set();
+  let submitted = false;
+  const optsEl = $('#opts');
+  optsEl.querySelectorAll('.opt').forEach(el => {
+    el.onclick = () => {
+      if (submitted) return;
+      const k = el.dataset.k;
+      if (isMulti) { sel.has(k) ? sel.delete(k) : sel.add(k); el.classList.toggle('sel'); }
+      else { sel = new Set([k]); optsEl.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o === el)); }
+    };
+  });
+  const btn = $('#submitBtn');
+  btn.onclick = () => {
+    if (!submitted) {
+      if (!sel.size) { alert('请选择答案'); return; }
+      submitted = true;
+      const picked = [...sel].sort().join('');
+      const answer = q.answer.split('').sort().join('');
+      const correct = picked === answer;
+      // 展示对错
+      optsEl.querySelectorAll('.opt').forEach(el => {
+        const k = el.dataset.k;
+        const inAns = q.answer.includes(k), inSel = sel.has(k);
+        el.style.pointerEvents = 'none';
+        if (inAns) el.classList.add('correct');
+        else if (inSel) el.classList.add('wrong');
+      });
+      recordAnswer(q, correct, mode);
+      $('#feedback').innerHTML = `
+        <div class="explain">
+          <div class="lbl">${correct ? '<span class="res-ok">✓ 回答正确</span>' : '<span class="res-bad">✗ 回答错误</span>'} · 正确答案：${q.answer}</div>
+          ${q.explain ? esc(q.explain) : '<span class="sub">（本题暂无解析）</span>'}
+        </div>`;
+      btn.textContent = '下一题 ›';
+    } else {
+      onNext();
+    }
+  };
+}
+function recordAnswer(q, correct, mode) {
+  S();
+  store.answered[q.id] = { correct, ts: now() };
+  // 错题本 + 间隔重复调度
+  if (mode === 'review') {
+    updateSR(q.id, correct);
+  } else {
+    if (!correct) addWrong(q.id);
+    else if (store.wrong[q.id]) updateSR(q.id, true); // 平时做对错题也算复习
+  }
+  saveStore();
+}
+
+// ==================================================================
+// 错题本 + 间隔重复
+// ==================================================================
+function addWrong(id) {
+  S();
+  const w = store.wrong[id];
+  if (!w) store.wrong[id] = { box: 0, due: now(), addTs: now(), lastTs: now(), wrongCount: 1 };
+  else { w.box = 0; w.due = now(); w.lastTs = now(); w.wrongCount++; }
+}
+function updateSR(id, correct) {
+  S();
+  const w = store.wrong[id];
+  if (!w) return;
+  if (correct) {
+    w.box++;
+    if (w.box >= SR_INTERVALS.length) { delete store.wrong[id]; return; } // 毕业
+    w.due = now() + SR_INTERVALS[w.box] * DAY;
+  } else {
+    w.box = 0; w.due = now(); w.wrongCount++;
+  }
+  w.lastTs = now();
+}
+function dueWrongIds() {
+  S();
+  return Object.keys(store.wrong).filter(id => BYID[id] && store.wrong[id].due <= now());
+}
+
+let reviewState = null;
+routes.wrong = (params) => {
+  if (params.start) return renderReview();
+  S();
+  const all = Object.keys(store.wrong).filter(id => BYID[id]);
+  const due = dueWrongIds();
+  const bySubj = {};
+  all.forEach(id => { const s = BYID[id].subject; bySubj[s] = (bySubj[s] || 0) + 1; });
+  app().innerHTML = `
+    ${topbar('错题本', "nav('home')")}
+    <div class="card"><div class="grid2">
+      <div class="stat"><div class="n" style="color:var(--bad)">${all.length}</div><div class="l">错题总数</div></div>
+      <div class="stat"><div class="n" style="color:var(--warn)">${due.length}</div><div class="l">今日待复习</div></div>
+    </div>
+    <div class="sub center" style="margin-top:6px">${SUBJECTS.map(s => `${SUBJECT_FULL[s]} ${bySubj[s] || 0}`).join(' · ')}</div>
+    </div>
+    ${all.length === 0 ? `<div class="empty"><div class="big">🎉</div>还没有错题<br><span class="sub">做错的题会自动收进这里，并按遗忘曲线安排复习</span></div>` : `
+    <div class="card">
+      <h3>间隔重复复习</h3>
+      <div class="sub" style="margin-bottom:12px">答对一次进入下一复习周期（今天→1天→3天→7天后），连续答对 4 次即“毕业”移出错题本；答错则重新开始。</div>
+      <button onclick="startReview('due')" ${due.length ? '' : 'disabled'}>开始复习今日待复习（${due.length}）</button>
+      <div class="row" style="margin-top:10px">
+        ${SUBJECTS.map(s => `<button class="ghost" onclick="startReview('${s}')" ${(bySubj[s] || 0) ? '' : 'disabled'}>复习${s}全部(${bySubj[s] || 0})</button>`).join('')}
+      </div>
+    </div>`}`;
+};
+window.startReview = (which) => {
+  S();
+  let ids;
+  if (which === 'due') ids = dueWrongIds();
+  else ids = Object.keys(store.wrong).filter(id => BYID[id] && BYID[id].subject === which);
+  if (!ids.length) return;
+  // 按到期时间排序，先复习最该复习的
+  ids.sort((a, b) => store.wrong[a].due - store.wrong[b].due);
+  reviewState = { ids, i: 0, which };
+  renderReview();
+};
+function renderReview() {
+  const st = reviewState;
+  if (!st || !st.ids.length) return nav('wrong');
+  // 动态：若当前 id 已毕业则跳过
+  while (st.i < st.ids.length && !store.wrong[st.ids[st.i]]) st.i++;
+  if (st.i >= st.ids.length) return finishReview();
+  const q = BYID[st.ids[st.i]];
+  const w = store.wrong[q.id];
+  app().innerHTML = `
+    ${topbar(`复习 · ${st.i + 1}/${st.ids.length}`, "if(confirm('结束复习？'))nav('wrong')")}
+    <div class="progress"><i style="width:${(st.i + 1) / st.ids.length * 100}%"></i></div>
+    <div class="sub" style="margin-bottom:8px">已错 ${w.wrongCount} 次 · 复习进度 ${w.box}/${SR_INTERVALS.length}</div>
+    ${questionCard(q, { mode: 'review' })}`;
+  wireQuestion(q, { mode: 'review', onNext: () => { st.i++; renderReview(); } });
+}
+function finishReview() {
+  const remaining = dueWrongIds().length;
+  app().innerHTML = `${topbar('复习完成', "nav('home')")}
+    <div class="card center"><div class="scorebig">✓</div>
+    <div class="sub" style="margin-top:8px">本轮复习结束${remaining ? `，还有 ${remaining} 道待复习` : '，今日复习已清空 🎉'}</div>
+    <div class="row" style="margin-top:18px">
+      ${remaining ? `<button onclick="startReview('due')">继续复习</button>` : ''}
+      <button class="ghost" onclick="nav('wrong')">返回错题本</button>
+    </div></div>`;
+}
+
+// ==================================================================
+// 模拟考试
+// ==================================================================
+let examState = null;
+routes.exam = (params) => {
+  if (examState && params.resume) return renderExam();
+  S();
+  app().innerHTML = `
+    ${topbar('模拟考试', "nav('home')")}
+    ${SUBJECTS.map(s => {
+    const sp = EXAM_SPEC[s];
+    const poolS = BANK.filter(q => q.subject === s && q.type === 'single').length;
+    const poolM = BANK.filter(q => q.subject === s && q.type === 'multi').length;
+    const enough = poolS >= sp.single && poolM >= sp.multi;
+    return `<div class="card">
+        <h3>${SUBJECT_FULL[s]}</h3>
+        <div class="sub">${sp.single} 单选（${sp.singlePt}分）+ ${sp.multi} 多选（${sp.multiPt}分） · 满分 ${sp.total} · 合格 ${sp.pass} · ${sp.minutes} 分钟</div>
+        <button style="margin-top:12px" onclick="startExam('${s}')" ${enough ? '' : 'disabled'}>${enough ? '开始模拟考' : '题量不足，暂不可考'}</button>
+      </div>`;
+  }).join('')}
+    ${store.exams.length ? `<div class="card"><h3>历史成绩</h3>${store.exams.slice(-8).reverse().map(e =>
+    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span>${SUBJECT_FULL[e.subject]}</span>
+        <span class="${e.score >= e.pass ? 'res-ok' : 'res-bad'}">${e.score}/${e.total} ${e.score >= e.pass ? '合格' : '未过'}</span>
+      </div>`).join('')}</div>` : ''}`;
+};
+window.startExam = (subj) => {
+  const sp = EXAM_SPEC[subj];
+  const singles = sample(BANK.filter(q => q.subject === subj && q.type === 'single'), sp.single);
+  const multis = sample(BANK.filter(q => q.subject === subj && q.type === 'multi'), sp.multi);
+  const qs = [...singles, ...multis];
+  examState = { subj, sp, ids: qs.map(q => q.id), answers: {}, i: 0, endAt: now() + sp.minutes * 60000, submitted: false };
+  renderExam();
+};
+function renderExam() {
+  const st = examState;
+  const q = BYID[st.ids[st.i]];
+  const remainMs = st.endAt - now();
+  if (remainMs <= 0 && !st.submitted) return submitExam(true);
+  app().innerHTML = `
+    <div class="topbar">
+      <button class="back" onclick="if(confirm('交卷并查看成绩？'))submitExam(false)">✕</button>
+      <div class="t">${st.i + 1}/${st.ids.length}</div>
+      <div class="r timer" id="timer"></div>
+    </div>
+    <div class="progress"><i style="width:${(st.i + 1) / st.ids.length * 100}%"></i></div>
+    ${examQuestionCard(q, st)}
+    <div class="row" style="margin-top:8px">
+      <button class="sec" onclick="examGoto(${st.i - 1})" ${st.i === 0 ? 'disabled' : ''}>‹ 上一题</button>
+      ${st.i < st.ids.length - 1 ? `<button onclick="examGoto(${st.i + 1})">下一题 ›</button>`
+      : `<button onclick="if(confirm('确认交卷？'))submitExam(false)">交卷</button>`}
+    </div>
+    <button class="sec sm" style="margin-top:10px" onclick="examSheet()">答题卡（已答 ${Object.keys(st.answers).length}/${st.ids.length}）</button>`;
+  tickTimer();
+}
+function examQuestionCard(q, st) {
+  const isMulti = q.type === 'multi';
+  const cur = new Set(st.answers[q.id] || []);
+  return `<div class="card">
+    <div class="qmeta"><span class="pill ${isMulti ? 'multi' : ''}">${isMulti ? '多选题' : '单选题'}</span><span class="pill">${isMulti ? st.sp.multiPt : st.sp.singlePt}分</span></div>
+    <div class="qstem">${esc(q.stem)}</div>
+    <div id="opts">${Object.entries(q.options).map(([k, v]) =>
+    `<div class="opt ${cur.has(k) ? 'sel' : ''}" onclick="examPick('${q.id}','${k}',${isMulti})"><div class="k">${k}</div><div>${esc(v)}</div></div>`).join('')}</div>
+  </div>`;
+}
+window.examPick = (id, k, isMulti) => {
+  const st = examState; const cur = new Set(st.answers[id] || []);
+  if (isMulti) { cur.has(k) ? cur.delete(k) : cur.add(k); }
+  else { cur.clear(); cur.add(k); }
+  st.answers[id] = [...cur];
+  if (!cur.size) delete st.answers[id];
+  renderExam();
+};
+window.examGoto = (i) => { examState.i = Math.max(0, Math.min(examState.ids.length - 1, i)); renderExam(); };
+window.examSheet = () => {
+  const st = examState;
+  app().innerHTML = `${topbar('答题卡', "renderExam()")}
+    <div class="card"><div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${st.ids.map((id, i) => `<button class="sm ${st.answers[id] ? '' : 'sec'}" style="flex:none;width:44px" onclick="examState.i=${i};renderExam()">${i + 1}</button>`).join('')}
+    </div>
+    <div class="sub" style="margin-top:12px">已答 ${Object.keys(st.answers).length} / ${st.ids.length}</div>
+    <button style="margin-top:12px" onclick="if(confirm('确认交卷？'))submitExam(false)">交卷</button>
+    </div>`;
+};
+let timerRAF = null;
+function tickTimer() {
+  const el = $('#timer'); if (!el || !examState) return;
+  const upd = () => {
+    if (!examState || examState.submitted) return;
+    const ms = examState.endAt - now();
+    const e = $('#timer'); if (!e) return;
+    if (ms <= 0) { submitExam(true); return; }
+    const m = Math.floor(ms / 60000), s = Math.floor(ms % 60000 / 1000);
+    e.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    e.classList.toggle('warn', ms < 5 * 60000);
+    timerRAF = setTimeout(upd, 1000);
+  };
+  clearTimeout(timerRAF); upd();
+}
+window.submitExam = (auto) => {
+  const st = examState; if (st.submitted) return;
+  st.submitted = true; clearTimeout(timerRAF);
+  const sp = st.sp;
+  let score = 0, nCorrect = 0;
+  const detail = st.ids.map(id => {
+    const q = BYID[id];
+    const picked = (st.answers[id] || []).slice().sort().join('');
+    const ans = q.answer.split('').sort().join('');
+    let pts = 0, ok = false;
+    if (q.type === 'single') { ok = picked === ans; pts = ok ? sp.singlePt : 0; }
+    else {
+      const pickedSet = new Set(st.answers[id] || []);
+      const ansSet = new Set(q.answer.split(''));
+      const anyWrong = [...pickedSet].some(k => !ansSet.has(k));
+      if (picked === ans) { pts = sp.multiPt; ok = true; }
+      else if (!anyWrong && pickedSet.size > 0) { pts = Math.min(pickedSet.size * 0.5, sp.multiPt - 0.5); } // 少选部分分
+      else pts = 0;
+    }
+    if (ok) nCorrect++;
+    score += pts;
+    // 记录：错题进错题本
+    S(); store.answered[id] = { correct: ok, ts: now() };
+    if (!ok) addWrong(id);
+    return { id, picked, ans, ok, pts };
+  });
+  score = Math.round(score * 10) / 10;
+  S(); store.exams.push({ subject: st.subj, score, total: sp.total, pass: sp.pass, ts: now(), n: st.ids.length, nCorrect });
+  saveStore();
+  st.detail = detail;
+  renderExamResult();
+};
+function renderExamResult() {
+  const st = examState, sp = st.sp;
+  const last = store.exams[store.exams.length - 1];
+  const pass = last.score >= sp.pass;
+  app().innerHTML = `${topbar('模拟考成绩', "nav('exam')")}
+    <div class="card center">
+      <div class="scorebig ${pass ? 'res-ok' : 'res-bad'}">${last.score}</div>
+      <div class="sub">满分 ${sp.total} · 合格线 ${sp.pass} · 答对 ${last.nCorrect}/${st.ids.length}</div>
+      <div style="margin-top:10px"><span class="pill ${pass ? 'real' : ''}" style="${pass ? '' : 'background:var(--badbg);color:var(--bad)'}">${pass ? '✓ 达到合格线' : '✗ 未达合格线'}</span></div>
+    </div>
+    <div class="card"><h3>逐题回顾</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${st.detail.map((d, i) => `<button class="sm ${d.ok ? '' : 'sec'}" style="flex:none;width:44px;${d.ok ? 'background:var(--ok)' : 'background:var(--badbg);color:var(--bad)'}" onclick="examReview(${i})">${i + 1}</button>`).join('')}
+      </div>
+      <div class="sub" style="margin-top:10px">绿=对，红=错。点击查看题目与解析。错题已自动加入错题本。</div>
+    </div>
+    <button onclick="nav('exam')">返回</button>`;
+}
+window.examReview = (i) => {
+  const st = examState; const q = BYID[st.ids[i]]; const d = st.detail[i];
+  app().innerHTML = `${topbar(`第 ${i + 1} 题`, "renderExamResult()")}
+    <div class="card">
+      <div class="qmeta">${srcPill(q.source_type)}<span class="pill ${q.type === 'multi' ? 'multi' : ''}">${q.type === 'multi' ? '多选' : '单选'}</span>
+        <span class="pill ${d.ok ? 'real' : ''}" style="${d.ok ? '' : 'background:var(--badbg);color:var(--bad)'}">${d.ok ? '✓ +' + d.pts : '✗'}</span></div>
+      <div class="qstem">${esc(q.stem)}</div>
+      <div>${Object.entries(q.options).map(([k, v]) => {
+    const inAns = q.answer.includes(k), inPick = (d.picked || '').includes(k);
+    let cls = ''; if (inAns) cls = 'correct'; else if (inPick) cls = 'wrong';
+    return `<div class="opt ${cls}" style="pointer-events:none"><div class="k">${k}</div><div>${esc(v)}</div></div>`;
+  }).join('')}</div>
+      <div class="explain"><div class="lbl">你的答案：${d.picked || '未答'} · 正确答案：${q.answer}</div>${q.explain ? esc(q.explain) : '<span class="sub">（暂无解析）</span>'}</div>
+    </div>
+    <div class="row"><button class="sec" onclick="examReview(${Math.max(0, i - 1)})" ${i === 0 ? 'disabled' : ''}>‹ 上一题</button>
+      <button class="sec" onclick="examReview(${Math.min(st.ids.length - 1, i + 1)})" ${i === st.ids.length - 1 ? 'disabled' : ''}>下一题 ›</button></div>`;
+};
+
+// ---------- 公共组件 ----------
+function topbar(title, backJs) {
+  return `<div class="topbar"><button class="back" onclick="${backJs}">‹</button><div class="t">${title}</div></div>`;
+}
+document.querySelectorAll('#tabbar button').forEach(b => b.onclick = () => nav(b.dataset.nav));
+
+// ---------- 启动 ----------
+(async function () {
+  app().innerHTML = '<div class="empty"><div class="big">📚</div>正在加载题库…</div>';
+  try {
+    await loadBank();
+    $('#tabbar').hidden = false;
+    router();
+  } catch (e) {
+    app().innerHTML = '<div class="empty"><div class="big">⚠️</div>题库加载失败<br><span class="sub">' + esc(e.message) + '</span></div>';
+  }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+})();
