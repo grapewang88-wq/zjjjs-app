@@ -3,15 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-  <meta name="theme-color" content="#182d6e" />
+  <meta name="theme-color" content="#d9631f" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>中级经济师备考</title>
+  <title>卜卜陪你考 · 中级经济师</title>
+  <link rel="icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="assets/bubu/bubu-happy-big.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div class="empty" style="padding-top:90px">
+      <img src="assets/bubu/bubu-base.png" width="96" height="96" alt="卜卜"
+        style="animation:bubu-bob 3s ease-in-out infinite;filter:drop-shadow(0 5px 8px rgba(180,100,40,.22))" />
+      <div style="margin-top:12px;font-weight:600;color:var(--brand)">卜卜正在准备题库…</div>
+    </div>
+  </div>
   <nav id="tabbar" hidden>
     <button data-nav="home"><span>🏠</span>首页</button>
     <button data-nav="practice"><span>✏️</span>刷题</button>

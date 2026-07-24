@@ -1,13 +1,14 @@
 {
-  "name": "中级经济师备考",
-  "short_name": "经济师备考",
-  "description": "中级经济师真题刷题 · 错题本(间隔重复) · 模拟考试",
+  "name": "卜卜陪你考 · 中级经济师",
+  "short_name": "卜卜备考",
+  "description": "卜卜陪你备考中级经济师：真题刷题 · 错题本(间隔重复) · 模拟考试",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#182d6e",
-  "theme_color": "#182d6e",
+  "background_color": "#fff7ef",
+  "theme_color": "#d9631f",
   "lang": "zh-CN",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "assets/bubu/bubu-happy-big.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

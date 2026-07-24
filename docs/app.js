@@ -29,6 +29,21 @@ function S() {
 const now = () => Date.now();
 const DAY = 86400000;
 
+// ---------- 卜卜吉祥物 ----------
+const BUBU_DIR = 'assets/bubu/';
+// 表情别名 -> 文件
+const BUBU = { happy: 'bubu-happy-big', wink: 'bubu-wink', sad: 'bubu-sad',
+  sleep: 'bubu-sleep', surprise: 'bubu-surprise', base: 'bubu-base' };
+function bubuImg(mood, size = 96, cls = '') {
+  const f = BUBU[mood] || BUBU.base;
+  return `<img class="${cls}" src="${BUBU_DIR}${f}.png" width="${size}" height="${size}" alt="卜卜" loading="lazy" />`;
+}
+// 卜卜说话气泡
+function bubuSay(mood, msg, sub = '') {
+  return `<div class="bubu-say">${bubuImg(mood, 56)}
+    <div class="msg">${msg}${sub ? `<div class="sub">${sub}</div>` : ''}</div></div>`;
+}
+
 // ---------- 数据 ----------
 let BANK = [];
 let BYID = {};
@@ -51,11 +66,14 @@ function changeAlert(cid) {
   const cg = CHANGES[cid];
   if (!cg) return '';
   const adds = (cg.adds && cg.adds.length) ? `<div style="margin-top:8px"><b>2025 新增/变动考点：</b><ul style="margin:6px 0 0;padding-left:20px">${cg.adds.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : '';
-  return `<div class="card" style="border-left:4px solid var(--warn)">
+  return `<div class="card" style="border-left:4px solid var(--warn);display:flex;gap:12px;align-items:flex-start">
+    <div>${bubuImg('surprise', 48)}</div>
+    <div style="flex:1">
     <div style="color:var(--warn);font-weight:700">⚠️ 2025 考纲变动章节${cg.big ? '（较大变动）' : ''}</div>
     ${cg.note ? `<div class="sub" style="margin-top:6px">${esc(cg.note)}</div>` : ''}
     ${adds}
     <div class="sub" style="margin-top:8px;font-size:12px">提示：历年真题可能未覆盖这些新增点，2026 年需重点关注。</div>
+    </div>
   </div>`;
 }
 function chName(cid) { return CHBYID[cid] ? CHBYID[cid].name : '未分类'; }
@@ -71,7 +89,11 @@ function srcPill(t) { const m = { '真题': 'real', '模拟题': 'mock', '习题
 
 // ---------- 路由 ----------
 const routes = {};
-function nav(name, params) { location.hash = '#' + name + (params ? '?' + new URLSearchParams(params) : ''); }
+function nav(name, params) {
+  const h = '#' + name + (params ? '?' + new URLSearchParams(params) : '');
+  if (location.hash === h) router();   // hash 未变化时 hashchange 不触发，手动渲染
+  else location.hash = h;
+}
 function router() {
   const raw = location.hash.slice(1) || 'home';
   const [name, qs] = raw.split('?');
@@ -94,8 +116,11 @@ routes.home = () => {
   const rate = totalDone ? Math.round(totalCorrect / totalDone * 100) : 0;
   app().innerHTML = `
     <div class="hero">
-      <h1>中级经济师备考</h1>
-      <div class="sub">距 2026 年 11 月 7 日考试 · 以通过为目标</div>
+      <div class="htext">
+        <h1>中级经济师备考</h1>
+        <div class="sub">距 2026 年 11 月 7 日考试 · 以通过为目标</div>
+        <span class="bless">🎉 卜卜祝你考试成功</span>
+      </div>
     </div>
     <div class="card"><div class="grid2">
       <div class="stat"><div class="n">${totalDone}</div><div class="l">累计做题</div></div>
@@ -191,10 +216,15 @@ function finishPractice() {
   const st = practiceState;
   const ids = st.ids;
   const correct = ids.filter(id => store.answered[id] && store.answered[id].correct).length;
+  const pct = Math.round(correct / ids.length * 100);
+  const mood = pct >= 80 ? 'happy' : pct >= 60 ? 'wink' : 'sad';
+  const word = pct >= 80 ? '太棒了，这一组你稳稳拿下！' : pct >= 60 ? '不错，再巩固下错题就更牢啦' : '没关系，错题都收好了，卜卜陪你再战';
   app().innerHTML = `${topbar('练习完成', "nav('home')")}
     <div class="card center">
-      <div class="scorebig" style="color:var(--brand)">${Math.round(correct / ids.length * 100)}%</div>
+      ${bubuImg(mood, 104, 'bubu-hero bubu-pop')}
+      <div class="scorebig" style="color:var(--brand)">${pct}%</div>
       <div class="sub">共 ${ids.length} 题 · 答对 ${correct} · 答错 ${ids.length - correct}</div>
+      <div style="margin-top:8px;font-weight:600;color:var(--brand)">${word}</div>
       <div class="row" style="margin-top:18px">
         <button onclick="startPractice('${st.subj}','${st.src}',true,false,'${st.chap || ''}')">再来一组</button>
         <button class="ghost" onclick="nav('wrong')">看错题本</button>
@@ -253,10 +283,14 @@ function wireQuestion(q, { mode, onNext }) {
       });
       recordAnswer(q, correct, mode);
       $('#feedback').innerHTML = `
+        ${correct
+          ? bubuSay('happy', '答对啦！', '卜卜给你比个心 💛')
+          : bubuSay('sad', '别灰心，已记进错题本', '卜卜陪你下次拿下它')}
         <div class="explain">
           <div class="lbl">${correct ? '<span class="res-ok">✓ 回答正确</span>' : '<span class="res-bad">✗ 回答错误</span>'} · 正确答案：${q.answer}</div>
           ${q.explain ? esc(q.explain) : '<span class="sub">（本题暂无解析）</span>'}
         </div>`;
+      const bs = $('#feedback .bubu-say img'); if (bs) bs.classList.add('bubu-pop');
       btn.textContent = '下一题 ›';
     } else {
       onNext();
@@ -319,7 +353,7 @@ routes.wrong = (params) => {
     </div>
     <div class="sub center" style="margin-top:6px">${SUBJECTS.map(s => `${SUBJECT_FULL[s]} ${bySubj[s] || 0}`).join(' · ')}</div>
     </div>
-    ${all.length === 0 ? `<div class="empty"><div class="big">🎉</div>还没有错题<br><span class="sub">做错的题会自动收进这里，并按遗忘曲线安排复习</span></div>` : `
+    ${all.length === 0 ? `<div class="empty">${bubuImg('sleep', 96, 'bubu-hero')}<div style="margin-top:6px;font-weight:600">还没有错题，卜卜先睡会儿 💤</div><span class="sub">做错的题会自动收进这里，并按遗忘曲线安排复习</span></div>` : `
     <div class="card">
       <h3>间隔重复复习</h3>
       <div class="sub" style="margin-bottom:12px">答对一次进入下一复习周期（今天→1天→3天→7天后），连续答对 4 次即“毕业”移出错题本；答错则重新开始。</div>
@@ -366,8 +400,8 @@ routes.lecture = (params) => {
       </div>
     </div>
     ${changeAlert(cid)}
-    ${content ? `<div class="card"><h3>三色笔记讲解</h3><div class="lecture">${renderLecture(content)}</div>
-      <div class="sub" style="margin-top:10px">红色为重点、蓝色为次重点，源自三色笔记标注。</div></div>`
+    ${content ? `<div class="card"><h3>考点讲解</h3><div class="lecture">${renderLecture(content)}</div>
+      <div class="sub" style="margin-top:10px">红色为重点、蓝色为次重点。</div></div>`
       : `<div class="empty"><div class="big">📖</div>本章暂无三色笔记讲解<br><span class="sub">可先通过“练本章题目”结合解析复习</span></div>`}`;
 };
 function renderLecture(runs) {
@@ -571,9 +605,11 @@ function renderExamResult() {
   const pass = last.score >= sp.pass;
   app().innerHTML = `${topbar('模拟考成绩', "nav('exam')")}
     <div class="card center">
+      ${bubuImg(pass ? 'happy' : 'wink', 104, 'bubu-hero bubu-pop')}
       <div class="scorebig ${pass ? 'res-ok' : 'res-bad'}">${last.score}</div>
       <div class="sub">满分 ${sp.total} · 合格线 ${sp.pass} · 答对 ${last.nCorrect}/${st.ids.length}</div>
       <div style="margin-top:10px"><span class="pill ${pass ? 'real' : ''}" style="${pass ? '' : 'background:var(--badbg);color:var(--bad)'}">${pass ? '✓ 达到合格线' : '✗ 未达合格线'}</span></div>
+      <div style="margin-top:10px;font-weight:600;color:var(--brand)">${pass ? '卜卜为你鼓掌，保持手感！' : '差一点点，卜卜相信你下次能过线'}</div>
     </div>
     <div class="card"><h3>逐题回顾</h3>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -609,7 +645,7 @@ document.querySelectorAll('#tabbar button').forEach(b => b.onclick = () => nav(b
 
 // ---------- 启动 ----------
 (async function () {
-  app().innerHTML = '<div class="empty"><div class="big">📚</div>正在加载题库…</div>';
+  app().innerHTML = `<div class="empty" style="padding-top:60px">${bubuImg('base', 96, 'bubu-hero')}<div style="margin-top:10px;font-weight:600;color:var(--brand)">卜卜正在准备题库…</div></div>`;
   try {
     await loadBank();
     $('#tabbar').hidden = false;
