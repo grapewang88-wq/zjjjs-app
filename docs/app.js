@@ -14,6 +14,8 @@ const SR_INTERVALS = [0, 1, 3, 7]; // 盒子0~3；答对4次毕业
 
 // ---------- 存储 ----------
 const LS_KEY = 'zjjjs_v1';
+// 请求持久化存储，降低被浏览器（尤其内存紧张/长期不用时）清除的概率
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
 let store = loadStore();
 function loadStore() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { return {}; }
