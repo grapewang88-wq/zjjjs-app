@@ -21,6 +21,25 @@ function loadStore() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { return {}; }
 }
 function saveStore() { localStorage.setItem(LS_KEY, JSON.stringify(store)); }
+// 备份/恢复：进度导出成一串备份码，换手机或被清后粘回即恢复（静态托管无云端的兜底）
+function backupProgress() {
+  try {
+    const code = btoa(unescape(encodeURIComponent(JSON.stringify(store))));
+    try { if (navigator.clipboard) navigator.clipboard.writeText(code); } catch (e) {}
+    window.prompt('这是你的备份码（已尝试自动复制）。请长按全选复制，粘到备忘录/微信收藏保存好。以后在任意设备点“恢复进度”粘回即可：', code);
+  } catch (e) { alert('备份失败：' + e.message); }
+}
+function restoreProgress() {
+  const code = window.prompt('粘贴你之前保存的备份码，恢复学习进度：');
+  if (!code) return;
+  try {
+    const data = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+    if (!data || typeof data !== 'object') throw new Error('格式不对');
+    store = data; saveStore();
+    alert('恢复成功！进度已还原。');
+    location.reload();
+  } catch (e) { alert('恢复失败，备份码可能不完整或有误：' + e.message); }
+}
 function S() {
   store.answered = store.answered || {};   // id -> {correct:bool, ts}
   store.wrong = store.wrong || {};          // id -> {box, due, addTs, lastTs, wrongCount}
@@ -141,7 +160,12 @@ routes.home = () => {
     <div class="card sub" style="font-size:13px">
       题库共 <b>${BANK.length}</b> 道（基础 ${BANK.filter(q => q.subject === '基础').length} · 人力 ${BANK.filter(q => q.subject === '人力').length}），
       来源含历年真题、模拟卷与习题。
-    </div>`;
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="ghost sm" onclick="backupProgress()">💾 备份进度</button>
+      <button class="ghost sm" onclick="restoreProgress()">↩️ 恢复进度</button>
+    </div>
+    <div class="sub" style="font-size:12px;text-align:center;margin-bottom:8px">换手机或进度丢失时，用备份码找回学习记录</div>`;
 };
 
 // ==================================================================
