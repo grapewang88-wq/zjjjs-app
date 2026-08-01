@@ -162,7 +162,7 @@ routes.home = () => {
   const totalDone = Object.keys(store.answered).length;
   const totalCorrect = Object.values(store.answered).filter(a => a.correct).length;
   const dueCount = dueWrongIds().length;
-  const wrongTotal = Object.keys(store.wrong).length;
+  const wrongTotal = Object.keys(store.wrong).filter(id => BYID[id]).length;
   const rate = totalDone ? Math.round(totalCorrect / totalDone * 100) : 0;
   app().innerHTML = `
     <div class="hero">
@@ -215,7 +215,7 @@ routes.practice = (params) => {
     ${topbar('刷题练习', "nav('home')")}
     <div class="card">
       <h3>选择科目</h3>
-      <div class="seg">${SUBJECTS.map(s => `<button class="${s === subj ? 'active' : ''}" onclick="nav('practice',{subject:'${s}',src:'${src}'})">${SUBJECT_FULL[s]}</button>`).join('')}</div>
+      <div class="seg">${SUBJECTS.map(s => `<button class="${s === subj ? 'active' : ''}" onclick="nav('practice',{subject:'${s}',src:'${src}',chap:''})">${SUBJECT_FULL[s]}</button>`).join('')}</div>
       <h3>题目来源</h3>
       <div>${['全部', '真题', '模拟题', '习题'].map(t => `<span class="chip ${t === src ? 'active' : ''}" onclick="nav('practice',{subject:'${subj}',src:'${t}',chap:'${chap}'})">${t}${t !== '全部' ? ` (${filterPool(subj, t, '').length})` : ` (${filterPool(subj, '全部', '').length})`}</span>`).join('')}</div>
       <h3 style="margin-top:14px">章节 ${chap ? `· <span style="color:var(--brand)">${esc(chName(chap))}</span>` : '· 全部'}</h3>

@@ -18,6 +18,9 @@ BANK = os.path.join(APP, "docs/bank.json")
 
 # ---------- 正则 ----------
 WM = re.compile(r'课程咨询[：:]*|环球网校[^\s，。]*|学员专用|请勿外泄|华图教育|中公教育|扫码\S{0,10}')
+# 尾部网址/页码水印(总挂在内容末尾)与【N分】分值标记
+WM_TAIL = re.compile(r'(?:https?://|www\.|官方网站[：:]|ekaoshi|mulupan|youlu).*$')
+SCORE_MARK = re.compile(r'【\s*[12]\s*分\s*】|（\s*[12]\s*分\s*）|\[\s*[12]\s*分\s*\]')
 # 题干页眉前缀：以 "N 年" 开头的来源标题 + 可选【单选/多选】 + 题号
 PREFIX = re.compile(
     r'^\s*\d{1,4}\s*年.{0,40}?'
@@ -35,7 +38,10 @@ def normfull(s):
     return re.sub(r'[\s\(\)（）【】\[\]。，、；：:,.;?？!！""''…—\-_]', '', s)
 
 def strip_wm(s):
-    return WM.sub('', s or '').strip()
+    s = WM.sub('', s or '')
+    s = WM_TAIL.sub('', s)      # 去尾部网址/页码水印
+    s = SCORE_MARK.sub('', s)   # 去【N分】分值标记
+    return s.strip()
 
 # ---------- 源答案索引（用于恢复多选） ----------
 ANS = re.compile(r'(?:参考答案|正确答案|答案)\s*[】\]]?\s*[:：]?\s*([A-Ea-e](?:[、,，和及/]\s*[A-Ea-e]|[A-Ea-e]){0,4})')

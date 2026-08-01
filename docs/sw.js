@@ -1,5 +1,5 @@
 /* 简易离线缓存 —— 首屏与题库缓存后可离线刷题 */
-const CACHE = 'zjjjs-v13';
+const CACHE = 'zjjjs-v14';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './bank.json',
   './chapters.json', './lecture.json', './changes.json', './manifest.webmanifest', './icon.svg',
   './assets/bubu/bubu-happy-big.png', './assets/bubu/bubu-wink.png', './assets/bubu/bubu-sad.png',
@@ -14,11 +14,15 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  if (new URL(e.request.url).origin !== self.location.origin) return; // 跨域(定位API等)不拦
+  // stale-while-revalidate:先给缓存秒开,同时后台拉新写回缓存,下次刷新即拿到修复后的数据
   e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-      const copy = res.clone();
-      caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => { });
-      return res;
-    }).catch(() => hit))
+    caches.match(e.request).then(hit => {
+      const net = fetch(e.request).then(res => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
+        return res;
+      }).catch(() => hit);
+      return hit || net;
+    })
   );
 });
