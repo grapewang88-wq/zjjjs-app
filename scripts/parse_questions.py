@@ -12,8 +12,11 @@ BASE = "/Users/grapewang/Documents/中级经济师考试/资料库_文本提取"
 OUT = "/Users/grapewang/Documents/中级经济师考试/备考app/data/questions_raw"
 os.makedirs(OUT, exist_ok=True)
 
-# 答案锚点：参考答案：X / 答案：X / 正确答案：X / 【答案】X / [答案]X
-ANSWER_RE = re.compile(r'(?:参考答案|正确答案|答案)\s*[】\]]?\s*[:：]?\s*([A-Ea-e]{1,5})\b')
+# 答案锚点：参考答案：X / 答案：X,Y / 正确答案：A、C、E / 【答案】X
+# 关键修复：支持逗号/顿号分隔的多选答案（旧正则 [A-Ea-e]{1,5} 会把 "B,C" 截成 "B" → 多选被误判单选）
+ANSWER_RE = re.compile(r'(?:参考答案|正确答案|答案)\s*[】\]]?\s*[:：]?\s*([A-Ea-e](?:[、,，和及/]\s*[A-Ea-e]|[A-Ea-e]){0,4})')
+def _norm_answer(raw):
+    return ''.join(sorted(set(re.findall(r'[A-E]', raw.upper()))))
 # 解析锚点：参考解析/答案解析/解析/【解析】
 EXPLAIN_RE = re.compile(r'^\s*[【\[]?\s*(?:参考解析|答案解析|解析)\s*[】\]]?\s*[:：]?\s*(.*)$')
 # 选项行：A xxx / A. xxx / A、xxx / A．xxx  （允许前导空格）
@@ -86,7 +89,7 @@ def parse_file(path):
             continue
 
         if ans_m and cur is not None:
-            cur["answer"] = ans_m.group(1).upper()
+            cur["answer"] = _norm_answer(ans_m.group(1))
             state = "answer"
             i += 1
             continue

@@ -71,6 +71,31 @@ let BYID = {};
 let CHAPTERS = { '基础': [], '人力': [] };
 let CHBYID = {};
 let LECTURE = {};
+// 运行期兜底：即便题库有漏网的脏数据，也不让坏题渲染给用户（防御性过滤）
+// 同时用「答案长度」强制校正 单选/多选 类型，杜绝多选被当单选。
+function sanitizeBank(list) {
+  const JIANG = /答案及解析|全国经济专业技术资格|考前冲刺卷|答案和解析|参考解析|课程咨询|环球网校|【\s*\d+\s*[.、]\s*(?:单选|多选|案例)/;
+  const PUNCT = /^[\s.。*·\-—_、,，:：;；]+$/;
+  const out = [];
+  for (const q of (list || [])) {
+    if (!q || !q.options) continue;
+    const ks = Object.keys(q.options);
+    if (ks.length < 2) continue;                                   // 选项太少
+    if (ks.join('') !== ks.map((_, i) => String.fromCharCode(65 + i)).join('')) continue; // 选项字母跳号
+    const vals = ks.map(k => String(q.options[k] == null ? '' : q.options[k]));
+    if (vals.some(v => !v.trim() || PUNCT.test(v.trim()))) continue; // 空/纯符号选项
+    if (vals.some(v => JIANG.test(v))) continue;                    // 选项串入讲义/解析/水印
+    const seen = new Set(vals.map(v => v.trim()));
+    if (seen.size !== vals.length) continue;                        // 选项重复
+    const ans = (q.answer || '').toUpperCase().replace(/[^A-E]/g, '');
+    if (!ans || [...ans].some(a => !(a in q.options))) continue;    // 答案缺失/不在选项
+    if (ks.length >= 3 && ans.length === ks.length) continue;       // 答案=全选（解析串扰）
+    q.answer = ans;
+    q.type = ans.length > 1 ? 'multi' : 'single';                   // 依答案强制校正题型
+    out.push(q);
+  }
+  return out;
+}
 async function loadBank() {
   const [b, c, l, ch2] = await Promise.all([
     fetch('bank.json').then(r => r.json()),
@@ -78,7 +103,7 @@ async function loadBank() {
     fetch('lecture.json').then(r => r.json()).catch(() => ({})),
     fetch('changes.json').then(r => r.json()).catch(() => ({})),
   ]);
-  BANK = b; BANK.forEach(q => BYID[q.id] = q);
+  BANK = sanitizeBank(b); BANK.forEach(q => BYID[q.id] = q);
   CHAPTERS = c; Object.values(c).flat().forEach(ch => CHBYID[ch.id] = ch);
   LECTURE = l; CHANGES = ch2;
 }
