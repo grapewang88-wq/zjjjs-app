@@ -203,11 +203,14 @@ routes.home = () => {
 let practiceState = null;
 routes.practice = (params) => {
   if (params.start) return renderPractice();
-  const subj = params.subject || store._lastSubject || '基础';
+  // 白名单校验:URL hash / 恢复的备份码里的参数会被拼进内联 onclick,必须限定取值防注入
+  const subj = SUBJECTS.includes(params.subject) ? params.subject
+    : (SUBJECTS.includes(store._lastSubject) ? store._lastSubject : '基础');
   store._lastSubject = subj; saveStore();
-  const src = params.src || '全部';
-  const chap = params.chap || '';   // 章节 id，空=全部章节
+  const src = ['全部', '真题', '模拟题', '习题'].includes(params.src) ? params.src : '全部';
+  const chap = (params.chap && CHBYID[params.chap]) ? params.chap : '';   // 必须是有效章节 id
   const pool = filterPool(subj, src, chap);
+  const newCnt = pool.filter(q => !store.answered[q.id]).length;
   app().innerHTML = `
     ${topbar('刷题练习', "nav('home')")}
     <div class="card">
@@ -227,7 +230,7 @@ routes.practice = (params) => {
         <button onclick="startPractice('${subj}','${src}',false,false,'${chap}')" ${pool.length ? '' : 'disabled'}>顺序练习</button>
         <button class="ghost" onclick="startPractice('${subj}','${src}',true,false,'${chap}')" ${pool.length ? '' : 'disabled'}>乱序练习</button>
       </div>
-      <button class="sec sm" style="margin-top:10px;flex:none" onclick="startPractice('${subj}','${src}',true,true,'${chap}')">只练未做过的题</button>
+      <button class="sec sm" style="margin-top:10px;flex:none" onclick="startPractice('${subj}','${src}',true,true,'${chap}')" ${newCnt ? '' : 'disabled'}>只练未做过的题（${newCnt}）</button>
     </div>`;
 };
 function filterPool(subj, src, chap) {
@@ -469,7 +472,7 @@ function renderLecture(runs) {
 }
 // 章节浏览
 routes.chapters = (params) => {
-  const subj = params.subject || store._lastSubject || '基础';
+  const subj = SUBJECTS.includes(params.subject) ? params.subject : (SUBJECTS.includes(store._lastSubject) ? store._lastSubject : '基础');
   const chs = CHAPTERS[subj] || [];
   const groups = {};
   chs.forEach(c => { (groups[c.part] = groups[c.part] || []).push(c); });
@@ -576,7 +579,7 @@ function renderExam() {
       : `<button onclick="if(confirm('确认交卷？'))submitExam(false)">交卷</button>`}
     </div>
     <button class="sec sm" style="margin-top:10px" onclick="examSheet()">答题卡（已答 ${Object.keys(st.answers).length}/${st.ids.length}）</button>`;
-  tickTimer();
+  startExamTimer();
 }
 function examQuestionCard(q, st) {
   const isMulti = q.type === 'multi';
@@ -599,32 +602,36 @@ window.examPick = (id, k, isMulti) => {
 window.examGoto = (i) => { examState.i = Math.max(0, Math.min(examState.ids.length - 1, i)); renderExam(); };
 window.examSheet = () => {
   const st = examState;
-  app().innerHTML = `${topbar('答题卡', "renderExam()")}
+  app().innerHTML = `<div class="topbar"><button class="back" onclick="renderExam()">‹</button><div class="t">答题卡</div><div class="r timer" id="timer"></div></div>
     <div class="card"><div style="display:flex;flex-wrap:wrap;gap:8px">
       ${st.ids.map((id, i) => `<button class="sm ${st.answers[id] ? '' : 'sec'}" style="flex:none;width:44px" onclick="examState.i=${i};renderExam()">${i + 1}</button>`).join('')}
     </div>
     <div class="sub" style="margin-top:12px">已答 ${Object.keys(st.answers).length} / ${st.ids.length}</div>
     <button style="margin-top:12px" onclick="if(confirm('确认交卷？'))submitExam(false)">交卷</button>
     </div>`;
+  startExamTimer();
 };
-let timerRAF = null;
-function tickTimer() {
-  const el = $('#timer'); if (!el || !examState) return;
-  const upd = () => {
-    if (!examState || examState.submitted) return;
+// 倒计时与页面元素解耦：无论当前在题目页/答题卡/其它页，计时都持续，到点强制交卷
+let examTimer = null;
+function startExamTimer() {
+  clearInterval(examTimer);
+  const tick = () => {
+    if (!examState || examState.submitted) { clearInterval(examTimer); return; }
     const ms = examState.endAt - now();
-    const e = $('#timer'); if (!e) return;
-    if (ms <= 0) { submitExam(true); return; }
-    const m = Math.floor(ms / 60000), s = Math.floor(ms % 60000 / 1000);
-    e.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    e.classList.toggle('warn', ms < 5 * 60000);
-    timerRAF = setTimeout(upd, 1000);
+    const e = $('#timer');
+    if (e && ms > 0) {
+      const m = Math.floor(ms / 60000), s = Math.floor(ms % 60000 / 1000);
+      e.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      e.classList.toggle('warn', ms < 5 * 60000);
+    }
+    if (ms <= 0) { clearInterval(examTimer); submitExam(true); }
   };
-  clearTimeout(timerRAF); upd();
+  tick();
+  examTimer = setInterval(tick, 1000);
 }
 window.submitExam = (auto) => {
   const st = examState; if (st.submitted) return;
-  st.submitted = true; clearTimeout(timerRAF);
+  st.submitted = true; clearInterval(examTimer);
   const sp = st.sp;
   let score = 0, nCorrect = 0;
   const detail = st.ids.map(id => {
