@@ -1,5 +1,5 @@
 /* 简易离线缓存 —— 首屏与题库缓存后可离线刷题 */
-const CACHE = 'zjjjs-v15';
+const CACHE = 'zjjjs-v16';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './bank.json',
   './chapters.json', './lecture.json', './changes.json', './manifest.webmanifest', './icon.svg',
   './assets/bubu/bubu-happy-big.png', './assets/bubu/bubu-wink.png', './assets/bubu/bubu-sad.png',
