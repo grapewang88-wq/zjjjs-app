@@ -76,9 +76,13 @@ let LECTURE = {};
 function sanitizeBank(list) {
   const JIANG = /答案及解析|全国经济专业技术资格|考前冲刺卷|答案和解析|参考解析|课程咨询|环球网校|【\s*\d+\s*[.、]\s*(?:单选|多选|案例)/;
   const PUNCT = /^[\s.。*·\-—_、,，:：;；]+$/;
+  // 讲义/解析碎片被当成题干:★评级、【提示】、枚举列表、术语重复——都不是真题目
+  const LEC = /★|【提示】|【举例】|【注意】|项目内容|项目举例|。\s*[2-9]\s*[.、]|；\s*[2-9]\s*[.、]|（\s*1\s*）[^（]{0,90}（\s*2\s*）/;
+  const termRepeat = (s) => { for (let k = 4; k < 13; k++) { if (s.length >= 2 * k && s.slice(0, k) === s.slice(k, 2 * k)) return true; } return false; };
   const out = [];
   for (const q of (list || [])) {
-    if (!q || !q.options) continue;
+    if (!q || !q.options || !q.stem) continue;
+    if (LEC.test(q.stem) || termRepeat(q.stem)) continue;         // 讲义碎片题干
     const ks = Object.keys(q.options);
     if (ks.length < 2) continue;                                   // 选项太少
     if (ks.join('') !== ks.map((_, i) => String.fromCharCode(65 + i)).join('')) continue; // 选项字母跳号

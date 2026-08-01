@@ -60,8 +60,20 @@ def build_answer_recs():
             recs[subj].append((before, a))
     return recs
 
+STRONG_LEC = re.compile(r'★|【提示】|【举例】|【注意】|项目内容|项目举例|。\s*[2-9]\s*[.、]|；\s*[2-9]\s*[.、]|（\s*1\s*）[^（]{0,90}（\s*2\s*）')
+def _term_repeat(s):
+    for k in range(4, 13):
+        if len(s) >= 2*k and s[:k] == s[k:2*k]:
+            return True
+    return False
+def is_lecture_stem(q):
+    # 题干是"三色笔记/讲义/解析"碎片(定义、枚举、★评级、术语重复)而非真正的题目
+    s = q['stem']
+    return _term_repeat(s) or bool(STRONG_LEC.search(s))
+
 def is_corrupt(q):
     r = []
+    if is_lecture_stem(q): r.append('stem_lecture')
     opts = q['options']
     vals = [v.strip() for v in opts.values()]
     for k, v in opts.items():
